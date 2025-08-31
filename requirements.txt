@@ -1,0 +1,7 @@
+python-bale-bot>=1.0.0
+asyncio
+json
+datetime
+random
+traceback
+time
