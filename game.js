@@ -734,18 +734,45 @@ class MilitaryGame {
         this.selectedCountryLayer = null;
         this.commandMarker = null;
 
-        fetch('https://unpkg.com/world-atlas@2/countries-110m.json')
-            .then(r => r.json())
-            .then((topology) => {
-                // Convert TopoJSON to GeoJSON via a lightweight inline converter
-                const objects = topology.objects;
-                const sourceObj = objects && (objects.countries || objects.ne_110m_admin_0_countries || objects.admin0);
-                const countries = (window.topojson && window.topojson.feature && sourceObj)
-                    ? window.topojson.feature(topology, sourceObj)
-                    : null;
-                // Fallback: try to read prebuilt geojson if available in topology.geojson
-                const geo = countries || topology.geojson || null;
-                if (!geo) return;
+        // Load world countries data with fallback
+        this.loadWorldMap();
+    }
+
+    loadWorldMap() {
+        const urls = [
+            'https://raw.githubusercontent.com/holtzy/D3-graph-gallery/master/DATA/world.geojson',
+            'https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json'
+        ];
+
+        const tryLoadMap = async (urlIndex = 0) => {
+            if (urlIndex >= urls.length) {
+                console.error('All map data sources failed, creating simple world map');
+                this.createFallbackMap();
+                return;
+            }
+
+            try {
+                const url = urls[urlIndex];
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                let geo;
+                if (url.includes('geojson')) {
+                    // Direct GeoJSON
+                    geo = data;
+                } else {
+                    // TopoJSON - convert to GeoJSON
+                    if (window.topojson && data.objects && data.objects.countries) {
+                        geo = topojson.feature(data, data.objects.countries);
+                    } else {
+                        throw new Error('TopJSON conversion failed');
+                    }
+                }
+
+                if (!geo || !geo.features) {
+                    throw new Error('Invalid map data structure');
+                }
+
                 this.countriesLayer = L.geoJSON(geo, {
                     style: {
                         color: 'rgba(255,255,255,0.2)',
@@ -756,13 +783,47 @@ class MilitaryGame {
                         layer.on('click', () => this.selectCountryOnMap(feature, layer));
                         layer.on('mouseover', () => layer.setStyle({ fillOpacity: 0.3 }));
                         layer.on('mouseout', () => {
-                            if (this.selectedCountryLayer !== layer) layer.setStyle({ fillOpacity: 0.15 });
+                            if (layer !== this.selectedCountryLayer) {
+                                layer.setStyle({ fillOpacity: 0.15 });
+                            }
                         });
                     }
                 }).addTo(this.map);
-                this.restoreCommandMarker();
-            })
-            .catch(() => {});
+
+                console.log('Map loaded successfully from:', url);
+                
+            } catch (error) {
+                console.warn(`Failed to load map from ${urls[urlIndex]}:`, error);
+                tryLoadMap(urlIndex + 1);
+            }
+        };
+
+        tryLoadMap();
+    }
+
+    createFallbackMap() {
+        // Create a simple world map with basic country shapes
+        const basicCountries = [
+            { name: "United States", coords: [[[40, -100], [50, -100], [50, -80], [40, -80], [40, -100]]] },
+            { name: "Russia", coords: [[[50, 40], [70, 40], [70, 180], [50, 180], [50, 40]]] },
+            { name: "China", coords: [[[20, 100], [40, 100], [40, 120], [20, 120], [20, 100]]] },
+            { name: "Iran", coords: [[[25, 50], [40, 50], [40, 65], [25, 65], [25, 50]]] }
+        ];
+
+        basicCountries.forEach(country => {
+            const polygon = L.polygon(country.coords[0], {
+                color: 'rgba(255,255,255,0.2)',
+                weight: 1,
+                fillOpacity: 0.15
+            }).addTo(this.map);
+            
+            polygon.bindPopup(country.name);
+            polygon.on('click', () => {
+                this.selectCountryOnMap({ properties: { name: country.name } }, polygon);
+            });
+        });
+
+        console.log('Fallback map created with basic country shapes');
     }
 
     loadMapSection() {
@@ -1001,10 +1062,14 @@ function loadMapSection() {
     }).addTo(window.__leafletMap);
 
     window.__countryLayers = {};
-    fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json')
+    // Use a simpler, more reliable world map data source
+    fetch('https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json')
       .then(r => r.json())
-      .then(topo => {
-        const geo = topojson.feature(topo, topo.objects.countries);
+      .then(geo => {
+        if (!geo || !geo.features) {
+          console.error('Failed to load map data');
+          return;
+        }
         L.geoJSON(geo, {
           style: { weight: 1, color: '#6b7280', fillColor: '#9ca3af', fillOpacity: 0.25 },
           onEachFeature: (feature, layer) => {

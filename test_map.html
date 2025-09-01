@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Map Test</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        #map { height: 500px; width: 100%; }
+        body { margin: 20px; font-family: Arial, sans-serif; }
+    </style>
+</head>
+<body>
+    <h1>Map Loading Test</h1>
+    <div id="map"></div>
+    <div id="status">Loading map...</div>
+
+    <script>
+        // Initialize map
+        const map = L.map('map').setView([20, 0], 2);
+        
+        // Add tile layer
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+
+        // Test multiple data sources
+        const dataSources = [
+            'https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json',
+            'https://raw.githubusercontent.com/holtzy/D3-graph-gallery/master/DATA/world.geojson'
+        ];
+
+        async function loadMap() {
+            const status = document.getElementById('status');
+            
+            for (let i = 0; i < dataSources.length; i++) {
+                try {
+                    status.textContent = `Trying source ${i + 1}...`;
+                    const response = await fetch(dataSources[i]);
+                    const data = await response.json();
+                    
+                    if (data && data.features) {
+                        L.geoJSON(data, {
+                            style: {
+                                color: '#3388ff',
+                                weight: 2,
+                                opacity: 0.6,
+                                fillOpacity: 0.2
+                            },
+                            onEachFeature: function(feature, layer) {
+                                const name = feature.properties.name || feature.properties.NAME || 'Unknown';
+                                layer.bindPopup(`<b>${name}</b>`);
+                            }
+                        }).addTo(map);
+                        
+                        status.textContent = `✅ Map loaded successfully from source ${i + 1}!`;
+                        return;
+                    }
+                } catch (error) {
+                    console.warn(`Source ${i + 1} failed:`, error);
+                }
+            }
+            
+            status.textContent = '❌ All map sources failed. Check console for errors.';
+        }
+
+        loadMap();
+    </script>
+</body>
+</html>
