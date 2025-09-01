@@ -931,6 +931,11 @@ class MilitaryGame {
             if (!data?.player) return;
             gameState.player = data.player;
 
+            // Load conquest state if available
+            if (data.conquestState) {
+                conquestState = { ...conquestState, ...data.conquestState };
+            }
+
             if (gameState.player.country_selected) {
                 this.showScreen('game');
                 this.showGameSection('dashboard');
@@ -944,8 +949,118 @@ class MilitaryGame {
 
     saveGameData() {
         try {
-            localStorage.setItem('militaryGame', JSON.stringify({ player: gameState.player, ts: Date.now() }));
+            localStorage.setItem('militaryGame', JSON.stringify({ 
+                player: gameState.player, 
+                conquestState: conquestState,
+                ts: Date.now() 
+            }));
         } catch {}
+    }
+
+    // Conquest Map Methods
+    attackTerritory() {
+        if (!conquestState.selectedTerritory) return;
+        
+        const territory = conquestState.territories[conquestState.selectedTerritory];
+        if (territory.owner === 'player') {
+            this.showNotification('You already control this territory!', 'info');
+            return;
+        }
+        
+        if (!isAdjacentToPlayer(territory.id)) {
+            this.showNotification('You can only attack adjacent territories!', 'warning');
+            return;
+        }
+
+        // Calculate battle
+        const playerPower = this.calculateTotalPower();
+        const territoryPower = territory.defensePower;
+        const winChance = playerPower / (playerPower + territoryPower);
+        const won = Math.random() < winChance;
+
+        if (won) {
+            // Player wins
+            if (territory.owner.startsWith('ai_')) {
+                // Remove from AI territories
+                const aiTerritories = conquestState.aiTerritories[territory.owner];
+                const index = aiTerritories.indexOf(territory.id);
+                if (index > -1) aiTerritories.splice(index, 1);
+            } else {
+                // Remove from neutral territories
+                const neutralIndex = conquestState.neutralTerritories.indexOf(territory.id);
+                if (neutralIndex > -1) conquestState.neutralTerritories.splice(neutralIndex, 1);
+            }
+
+            // Add to player territories
+            territory.owner = 'player';
+            territory.defensePower = Math.max(5, territoryPower - 5); // Reduce defense after conquest
+            conquestState.playerTerritories.push(territory.id);
+
+            this.showNotification(`Victory! You conquered ${territory.name}!`, 'success');
+            gameState.player.battles_won++;
+        } else {
+            // Player loses
+            this.showNotification(`Attack failed! ${territory.name} defended successfully.`, 'error');
+            gameState.player.battles_lost++;
+        }
+
+        updateTerritoryDisplay();
+        updateConquestStats();
+        updateConquestInfo();
+        updateConquestControls();
+        this.saveGameData();
+    }
+
+    fortifyTerritory() {
+        if (!conquestState.selectedTerritory) return;
+        
+        const territory = conquestState.territories[conquestState.selectedTerritory];
+        if (territory.owner !== 'player') {
+            this.showNotification('You can only fortify your own territories!', 'warning');
+            return;
+        }
+
+        const cost = 10000;
+        if (gameState.player.points < cost) {
+            this.showNotification('Not enough money to fortify!', 'error');
+            return;
+        }
+
+        gameState.player.points -= cost;
+        territory.defensePower += 5;
+        
+        this.showNotification(`Fortified ${territory.name}! Defense increased by 5.`, 'success');
+        updateTerritoryDisplay();
+        updateConquestInfo();
+        this.updateGameDisplay();
+        this.saveGameData();
+    }
+
+    scoutTerritory() {
+        if (!conquestState.selectedTerritory) return;
+        
+        const territory = conquestState.territories[conquestState.selectedTerritory];
+        const cost = 5000;
+        
+        if (gameState.player.points < cost) {
+            this.showNotification('Not enough money to scout!', 'error');
+            return;
+        }
+
+        gameState.player.points -= cost;
+        
+        let info = `Scout Report for ${territory.name}:\n`;
+        info += `Defense Power: ${territory.defensePower}\n`;
+        info += `Owner: ${territory.owner === 'player' ? 'You' : territory.owner.startsWith('ai_') ? 'AI' : 'Neutral'}\n`;
+        
+        if (territory.owner.startsWith('ai_')) {
+            const ai = AI_NATIONS.find(nation => nation.id === territory.owner);
+            info += `AI Nation: ${ai ? ai.name : 'Unknown'}\n`;
+        }
+        
+        this.showNotification(info, 'info');
+        this.updateGameDisplay();
+        this.saveGameData();
     }
 }
 
@@ -959,143 +1074,272 @@ document.addEventListener('DOMContentLoaded', () => {
     window.game = new MilitaryGame();
 });
 // =======================
-// Map Conquest Mechanics
+// World Conquest System
 // =======================
-function colorCountriesByOwnership() {
-  if (!window.__countryLayers) return;
-  Object.entries(window.__countryLayers).forEach(([name, layer]) => {
-    const owned = player.owned_territories?.includes(name);
-    const selected = window.__selectedCountry?.properties?.name === name;
-    layer.setStyle({
-      fillColor: owned ? '#34d399' : selected ? '#60a5fa' : '#9ca3af',
-      fillOpacity: owned ? 0.55 : selected ? 0.45 : 0.25,
-      color: owned ? '#10b981' : '#6b7280',
-      weight: owned ? 1.5 : 1,
+
+// Territory data structure
+const TERRITORY_NAMES = [
+    'North America', 'South America', 'Europe', 'Africa', 'Asia', 'Oceania',
+    'Arctic', 'Antarctica', 'Greenland', 'Iceland', 'Japan', 'Australia',
+    'Brazil', 'Russia', 'China', 'India', 'Canada', 'Mexico', 'Argentina',
+    'Chile', 'Peru', 'Colombia', 'Venezuela', 'Ecuador', 'Bolivia',
+    'Paraguay', 'Uruguay', 'Guyana', 'Suriname', 'French Guiana', 'Cuba',
+    'Jamaica', 'Haiti', 'Dominican Republic', 'Puerto Rico', 'Trinidad',
+    'Barbados', 'Grenada', 'St. Lucia', 'St. Vincent', 'Antigua', 'Dominica',
+    'St. Kitts', 'Belize', 'Guatemala', 'Honduras', 'Nicaragua', 'Costa Rica',
+    'Panama', 'El Salvador', 'United Kingdom', 'France', 'Germany', 'Italy',
+    'Spain', 'Portugal', 'Netherlands', 'Belgium', 'Switzerland', 'Austria',
+    'Poland', 'Czech Republic', 'Slovakia', 'Hungary', 'Romania', 'Bulgaria',
+    'Greece', 'Turkey', 'Ukraine', 'Belarus', 'Lithuania', 'Latvia',
+    'Estonia', 'Finland', 'Sweden', 'Norway', 'Denmark', 'Ireland',
+    'Iceland', 'Luxembourg', 'Liechtenstein', 'Monaco', 'Andorra', 'San Marino',
+    'Vatican City', 'Malta', 'Cyprus', 'Albania', 'Macedonia', 'Montenegro',
+    'Bosnia', 'Croatia', 'Slovenia', 'Serbia', 'Kosovo', 'Moldova'
+];
+
+// AI Nations
+const AI_NATIONS = [
+    { id: 'ai_red', name: 'Red Empire', color: '#dc2626', territories: [], power: 50 },
+    { id: 'ai_blue', name: 'Blue Federation', color: '#2563eb', territories: [], power: 45 },
+    { id: 'ai_green', name: 'Green Alliance', color: '#16a34a', territories: [], power: 40 },
+    { id: 'ai_purple', name: 'Purple Dominion', color: '#9333ea', territories: [], power: 35 },
+    { id: 'ai_orange', name: 'Orange Republic', color: '#ea580c', territories: [], power: 30 }
+];
+
+// Global conquest state
+let conquestState = {
+    territories: {},
+    selectedTerritory: null,
+    playerTerritories: [],
+    aiTerritories: {},
+    neutralTerritories: []
+};
+
+function initializeConquestMap() {
+    const mapContainer = document.getElementById('conquest-map');
+    if (!mapContainer) return;
+
+    // Clear existing content
+    mapContainer.innerHTML = '';
+
+    // Initialize territories
+    conquestState.territories = {};
+    conquestState.playerTerritories = [];
+    conquestState.aiTerritories = {};
+    conquestState.neutralTerritories = [];
+
+    // Create territory grid (48 territories total)
+    for (let i = 0; i < 48; i++) {
+        const territory = {
+            id: `territory_${i}`,
+            name: TERRITORY_NAMES[i] || `Territory ${i + 1}`,
+            owner: 'neutral',
+            defensePower: Math.floor(Math.random() * 20) + 5,
+            position: i
+        };
+
+        conquestState.territories[territory.id] = territory;
+        conquestState.neutralTerritories.push(territory.id);
+
+        // Create territory element
+        const territoryEl = document.createElement('div');
+        territoryEl.className = 'territory neutral';
+        territoryEl.dataset.territoryId = territory.id;
+        territoryEl.innerHTML = `
+            <div class="territory-name">${territory.name}</div>
+            <div class="territory-power">${territory.defensePower}</div>
+        `;
+
+        territoryEl.addEventListener('click', () => selectTerritory(territory.id));
+        mapContainer.appendChild(territoryEl);
+    }
+
+    // Initialize AI nations with random territories
+    initializeAINations();
+    updateConquestStats();
+    updateConquestInfo();
+}
+
+function initializeAINations() {
+    AI_NATIONS.forEach(ai => {
+        conquestState.aiTerritories[ai.id] = [];
+        
+        // Give each AI 2-4 random territories
+        const territoryCount = Math.floor(Math.random() * 3) + 2;
+        for (let i = 0; i < territoryCount && conquestState.neutralTerritories.length > 0; i++) {
+            const randomIndex = Math.floor(Math.random() * conquestState.neutralTerritories.length);
+            const territoryId = conquestState.neutralTerritories.splice(randomIndex, 1)[0];
+            
+            conquestState.territories[territoryId].owner = ai.id;
+            conquestState.territories[territoryId].defensePower += ai.power;
+            conquestState.aiTerritories[ai.id].push(territoryId);
+        }
     });
-  });
+
+    updateTerritoryDisplay();
+    updateAINationsDisplay();
 }
 
-function isAdjacent(targetName) {
-  if (!player.owned_territories?.length) return false;
-  const targetLayer = window.__countryLayers[targetName];
-  if (!targetLayer) return false;
-  const tb = targetLayer.getBounds();
-  return player.owned_territories.some(name => {
-    const l = window.__countryLayers[name];
-    if (!l) return false;
-    const b = l.getBounds();
-    return b.intersects(tb) || (b.overlaps ? b.overlaps(tb) : false);
-  });
+function selectTerritory(territoryId) {
+    // Deselect previous territory
+    if (conquestState.selectedTerritory) {
+        const prevEl = document.querySelector(`[data-territory-id="${conquestState.selectedTerritory}"]`);
+        if (prevEl) prevEl.classList.remove('selected');
+    }
+
+    // Select new territory
+    conquestState.selectedTerritory = territoryId;
+    const territoryEl = document.querySelector(`[data-territory-id="${territoryId}"]`);
+    if (territoryEl) territoryEl.classList.add('selected');
+
+    updateConquestInfo();
+    updateConquestControls();
 }
 
-function placeCommandPostFromSelection() {
-  if (!window.__selectedCountry) return;
-  const name = window.__selectedCountry.properties.name;
-  if (player.owned_territories?.length) {
-    showToast('You already placed your base.', 'info');
-    return;
-  }
-  player.command_post = name;
-  player.owned_territories = [name];
-  saveGameData();
-  updateMapInfo();
-  colorCountriesByOwnership();
-  showToast(`Base established in ${name}.`, 'success');
+function updateTerritoryDisplay() {
+    Object.values(conquestState.territories).forEach(territory => {
+        const territoryEl = document.querySelector(`[data-territory-id="${territory.id}"]`);
+        if (!territoryEl) return;
+
+        // Remove all owner classes
+        territoryEl.classList.remove('player', 'ai', 'neutral');
+        
+        // Add appropriate class
+        if (territory.owner === 'player') {
+            territoryEl.classList.add('player');
+        } else if (territory.owner.startsWith('ai_')) {
+            territoryEl.classList.add('ai');
+        } else {
+            territoryEl.classList.add('neutral');
+        }
+
+        // Update power display
+        const powerEl = territoryEl.querySelector('.territory-power');
+        if (powerEl) powerEl.textContent = territory.defensePower;
+    });
 }
 
-function attackSelectedCountry() {
-  if (!window.__selectedCountry) return;
-  const name = window.__selectedCountry.properties.name;
-  if (player.owned_territories.includes(name)) {
-    showToast('You already control this country.', 'info');
-    return;
-  }
-  if (!isAdjacent(name)) {
-    showToast('You can only attack neighboring countries.', 'warning');
-    return;
-  }
-  const yourPower = (player.attack_power || 10) + (player.level || 1) * 2;
-  const aiPower = Math.max(6, 8 + Math.floor(Math.random() * 8));
-  const win = Math.random() < yourPower / (yourPower + aiPower);
-  if (win) {
-    player.owned_territories.push(name);
-    saveGameData();
-    colorCountriesByOwnership();
-    updateMapInfo();
-    showToast(`Victory! You annexed ${name}.`, 'success');
-  } else {
-    player.score = Math.max(0, (player.score || 0) - 5);
-    saveGameData();
-    showToast('Attack failed. Your forces are regrouping.', 'error');
-  }
+function updateConquestStats() {
+    const playerCount = conquestState.playerTerritories.length;
+    const aiCount = Object.values(conquestState.aiTerritories).reduce((sum, territories) => sum + territories.length, 0);
+    const neutralCount = conquestState.neutralTerritories.length;
+
+    const playerEl = document.getElementById('player-territories');
+    const aiEl = document.getElementById('ai-territories');
+    const neutralEl = document.getElementById('neutral-territories');
+
+    if (playerEl) playerEl.textContent = playerCount;
+    if (aiEl) aiEl.textContent = aiCount;
+    if (neutralEl) neutralEl.textContent = neutralCount;
 }
 
-function updateMapInfo() {
-  const infoEl = document.getElementById('map-info');
-  if (!infoEl) return;
-  const ownedCount = player.owned_territories?.length || 0;
-  const baseName = player.command_post || 'None';
-  const selName = window.__selectedCountry?.properties?.name || '—';
-  infoEl.innerHTML = `<b>Base:</b> ${baseName} &nbsp;|&nbsp; <b>Owned:</b> ${ownedCount} &nbsp;|&nbsp; <b>Selected:</b> ${selName}`;
+function updateConquestInfo() {
+    if (!conquestState.selectedTerritory) {
+        document.getElementById('selected-name').textContent = 'None';
+        document.getElementById('territory-owner').textContent = '—';
+        document.getElementById('territory-power').textContent = '—';
+        return;
+    }
 
-  const placeBtn = document.getElementById('place-cp-btn');
-  const attackBtn = document.getElementById('attack-btn');
-  if (placeBtn) {
-    placeBtn.disabled = !(window.__selectedCountry && !player.command_post);
-  }
-  if (attackBtn) {
-    attackBtn.disabled = !(window.__selectedCountry &&
-      player.command_post &&
-      !player.owned_territories.includes(selName) &&
-      isAdjacent(selName));
-  }
+    const territory = conquestState.territories[conquestState.selectedTerritory];
+    if (!territory) return;
+
+    document.getElementById('selected-name').textContent = territory.name;
+    
+    let ownerName = '—';
+    if (territory.owner === 'player') {
+        ownerName = 'You';
+    } else if (territory.owner.startsWith('ai_')) {
+        const ai = AI_NATIONS.find(nation => nation.id === territory.owner);
+        ownerName = ai ? ai.name : 'AI';
+    } else {
+        ownerName = 'Neutral';
+    }
+    
+    document.getElementById('territory-owner').textContent = ownerName;
+    document.getElementById('territory-power').textContent = territory.defensePower;
+}
+
+function updateConquestControls() {
+    const attackBtn = document.getElementById('attack-territory-btn');
+    const fortifyBtn = document.getElementById('fortify-btn');
+    const scoutBtn = document.getElementById('scout-btn');
+
+    if (!conquestState.selectedTerritory) {
+        if (attackBtn) attackBtn.disabled = true;
+        if (fortifyBtn) fortifyBtn.disabled = true;
+        if (scoutBtn) scoutBtn.disabled = true;
+        return;
+    }
+
+    const territory = conquestState.territories[conquestState.selectedTerritory];
+    const canAttack = territory.owner !== 'player' && isAdjacentToPlayer(territory.id);
+    const canFortify = territory.owner === 'player';
+
+    if (attackBtn) attackBtn.disabled = !canAttack;
+    if (fortifyBtn) fortifyBtn.disabled = !canFortify;
+    if (scoutBtn) scoutBtn.disabled = false;
+}
+
+function isAdjacentToPlayer(territoryId) {
+    if (conquestState.playerTerritories.length === 0) return true; // Can attack any territory if no territories owned
+    
+    const territory = conquestState.territories[territoryId];
+    const territoryPos = territory.position;
+    
+    // Check if any player territory is adjacent (simplified adjacency)
+    return conquestState.playerTerritories.some(playerTerritoryId => {
+        const playerTerritory = conquestState.territories[playerTerritoryId];
+        const playerPos = playerTerritory.position;
+        
+        // Simple adjacency check (8-directional)
+        const row = Math.floor(territoryPos / 8);
+        const col = territoryPos % 8;
+        const playerRow = Math.floor(playerPos / 8);
+        const playerCol = playerPos % 8;
+        
+        return Math.abs(row - playerRow) <= 1 && Math.abs(col - playerCol) <= 1;
+    });
+}
+
+
+
+function updateAINationsDisplay() {
+    const container = document.getElementById('ai-nations-list');
+    if (!container) return;
+
+    container.innerHTML = '';
+    
+    AI_NATIONS.forEach(ai => {
+        const territories = conquestState.aiTerritories[ai.id] || [];
+        if (territories.length === 0) return;
+
+        const aiEl = document.createElement('div');
+        aiEl.className = 'ai-nation';
+        aiEl.innerHTML = `
+            <div class="ai-nation-name">${ai.name}</div>
+            <div class="ai-nation-territories">${territories.length} territories</div>
+        `;
+        container.appendChild(aiEl);
+    });
 }
 
 function loadMapSection() {
-  console.log(">>> loadMapSection triggered");
-  const mapWrapper = document.getElementById('leaflet-map');
-  if (!mapWrapper) return;
-  if (!window.__leafletMap) {
-    window.__leafletMap = L.map('leaflet-map').setView([20, 0], 2);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap'
-    }).addTo(window.__leafletMap);
-
-    window.__countryLayers = {};
-    // Use a simpler, more reliable world map data source
-    fetch('https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json')
-      .then(r => r.json())
-      .then(geo => {
-        if (!geo || !geo.features) {
-          console.error('Failed to load map data');
-          return;
-        }
-        L.geoJSON(geo, {
-          style: { weight: 1, color: '#6b7280', fillColor: '#9ca3af', fillOpacity: 0.25 },
-          onEachFeature: (feature, layer) => {
-            const name = feature.properties.name || feature.properties.admin;
-            feature.properties.name = name;
-            window.__countryLayers[name] = layer;
-            layer.on('click', () => {
-              window.__selectedCountry = feature;
-              colorCountriesByOwnership();
-              updateMapInfo();
-            });
-          }
-        }).addTo(window.__leafletMap);
-        colorCountriesByOwnership();
-        updateMapInfo();
-      });
-  } else {
-    setTimeout(() => {
-      window.__leafletMap.invalidateSize();
-      colorCountriesByOwnership();
-      updateMapInfo();
-    }, 0);
-  }
-
-  document.getElementById('place-cp-btn')
-    ?.addEventListener('click', placeCommandPostFromSelection);
-  document.getElementById('attack-btn')
-    ?.addEventListener('click', attackSelectedCountry);
+    console.log(">>> loadMapSection triggered - Loading Conquest Map");
+    
+    // Initialize the conquest map
+    initializeConquestMap();
+    
+    // Set up event listeners
+    document.getElementById('attack-territory-btn')?.addEventListener('click', () => {
+        if (window.game) window.game.attackTerritory();
+    });
+    
+    document.getElementById('fortify-btn')?.addEventListener('click', () => {
+        if (window.game) window.game.fortifyTerritory();
+    });
+    
+    document.getElementById('scout-btn')?.addEventListener('click', () => {
+        if (window.game) window.game.scoutTerritory();
+    });
 }

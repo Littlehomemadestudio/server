@@ -836,22 +836,58 @@ body {
                 <!-- Map Section -->
 <div id="map" class="game-section">
   <div class="section-header">
-    <h2><i class="fas fa-map"></i> World Map</h2>
+    <h2><i class="fas fa-map"></i> World Conquest</h2>
     <button class="btn-back" data-back="dashboard">
       <i class="fas fa-arrow-left"></i> Back
     </button>
   </div>
-  <div class="map-info" id="map-info">Select a country.</div>
+  
+  <div class="map-stats">
+    <div class="stat-card">
+      <div class="stat-value" id="player-territories">0</div>
+      <div class="stat-label">Your Territories</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" id="ai-territories">0</div>
+      <div class="stat-label">AI Territories</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" id="neutral-territories">0</div>
+      <div class="stat-label">Neutral</div>
+    </div>
+  </div>
+
+  <div class="map-info" id="map-info">
+    <div class="selected-territory">
+      <strong>Selected:</strong> <span id="selected-name">None</span>
+    </div>
+    <div class="territory-owner">
+      <strong>Owner:</strong> <span id="territory-owner">—</span>
+    </div>
+    <div class="territory-power">
+      <strong>Defense Power:</strong> <span id="territory-power">—</span>
+    </div>
+  </div>
+
   <div class="map-controls">
-    <button id="place-cp-btn" class="btn-primary" disabled>
-      <i class="fas fa-flag"></i> Place Base
+    <button id="attack-territory-btn" class="btn-danger" disabled>
+      <i class="fas fa-crosshairs"></i> Attack Territory
     </button>
-    <button id="attack-btn" class="btn-secondary" disabled>
-      <i class="fas fa-fist-raised"></i> Attack & Expand
+    <button id="fortify-btn" class="btn-primary" disabled>
+      <i class="fas fa-shield-alt"></i> Fortify
+    </button>
+    <button id="scout-btn" class="btn-secondary" disabled>
+      <i class="fas fa-binoculars"></i> Scout
     </button>
   </div>
+
   <div class="map-wrapper">
-    <div id="leaflet-map" class="leaflet-map"></div>
+    <div id="conquest-map" class="conquest-map"></div>
+  </div>
+
+  <div class="ai-status">
+    <h3>AI Nations</h3>
+    <div id="ai-nations-list" class="ai-nations-grid"></div>
   </div>
 </div>
 
